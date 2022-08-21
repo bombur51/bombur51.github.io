@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+<!--
+Author: Christian T. Höhne 2021,2022
+TODO: a pending transfer with no action (e.g unicredit to flexia) must show the Confirm button (now it does not)
+DONE @ line 273 on 20/7/2022 
+-->
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Running balance of PENDING or FUTURE transactions for all accounts</title>
+		<style>
+			.main {
+				max-width: 400px;
+				margin: auto;
+				text-align: center;				
+			}
+			table {background-color: lightyellow; }
+			.num {
+				text-align: right;
+			}
+			.pos {
+				color: green;
+				font-weight: bold;
+			}
+			.neg {
+				color: red;
+				font-weight: bold;
+			}
+			.action {
+				background-color: yellow;
+			}
+			.center {
+				text-align: center;
+			}
+			table {
+				margin-left: auto;
+				margin-right: auto;
+			}
+			th {
+				background: teal;
+				color: white;
+				position: sticky;
+				top: 0;
+			}
+		</style>
+		<!-- component template -->
+		<script type="text/x-template" id="account-template">
+			<div><!-- component container -->
+				<hr>
+				<h4 v-if="hasLink" class="center"><a title="Transactions of this account" target="accounts" :href="link(name)">{{ name | maiuscolo }}</a><br>
+					<div class="center">
+						Saldo iniziale: <b class="num" :class="{neg: saldoIniziale<0}">{{ saldoIniziale }}</b>
+					</div>
+				</h4>
+				<h4 v-else class="center">{{ name | maiuscolo }}<br>
+					<div class="center">
+						Saldo iniziale: <b class="num" :class="{neg: saldoIniziale<0}">{{ saldoIniziale }}</b>
+					</div>
+				</h4>
+				
+				<table v-if="items.length" border>
+					<caption v-if="actions">
+						Il saldo mostrato in Airtable è quello della ultima riga gialla.
+						<span style="color:red">Ci sono azioni da completare <b>OGGI</b></span>.<br/>
+						Quando fatto, premere il pulsante.
+					</caption>
+					<thead>
+						<tr>
+							<th v-for="header in headers">
+								{{ header }}
+							</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="item in items" :class="{action: item.actionToday}">
+							<td>{{ item.action | azione }}</td>
+							<td>{{ item.date }}</td>
+							<td class="num" :class="{pos: item.amt>0}">{{ item.amt.toFixed(2) }}</td>
+							<td>{{ item.desc }}
+								<button v-if="item.showResetButton" @click="confirmPrompt(item)">
+									Conferma
+								</button>
+							</td>
+							<td class="num" :class="{neg: item.saldoCorrente.toFixed(2)<0}">{{ item.saldoCorrente.toFixed(2) }}</td>
+						</tr>
+					</tbody>
+				</table>
+				
+			</div>
+		</script>
+	</head>
+	<body>
+		<div v-show="isLoaded" id="app" style="display: none" class="main">
+			<h2 class="center">Running balance of PENDING or FUTURE <a target="transactions" title="Enter a new transaction" href="https://airtable.com/shr9KcAxH7Az1SEd6">transactions</a> for all accounts ({{oggi}})</h2>
+			<!--Border: <input type="checkbox" v-model="cb"></input>-->
+			<account v-for="(conto,index) in names()" :name="conto" :key="index" :border="border">
+				<!--{{ oggi }} (nel chiamante)-->{{ oggi }}
+			</account>
+			<p><hr>
+				Patrimonio: <span id="total"></span>
+			</p>
+		</div>
+	</body>
+</html>
+<!--<script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script><!-- dev version -->
+<script src="https://cdn.jsdelivr.net/npm/vue@2.x"></script><!-- min version (production) -->
+<script>
+	// ---- GLOBALS ----
+	var fd = []; // array with fetched data
+	var accounts = {}; // object with all accounts having pending/future transactions
+	var APIkey = localStorage.getItem("APIkey");
+	if(!APIkey) {
+		APIkey = prompt("Airtable API key:");
+		if(APIkey) localStorage.setItem("APIkey", APIkey);
+	} // here the API key is defined
+	//const base = "appiV5bN6nwnEFYSH"; // 2020, change this when changing year
+	const base  = "appNIINomQocy5IWJ"; // Anno corrente
+	//const base = "appSq7pn2BzShqOjn"; // Anno corrente copy
+
+	
+	function confirmPrompt(item) {
+		let commission = null;
+		mydate = new Date().toISOString().substr(0,10); //suggest today's date, but it can be chan
+		myamt = Math.abs(item.amt);
+		mydesc = item.descOrig;
+		mytext =  mydate+"  "+myamt+"  "+mydesc;
+		do {
+			mytext = prompt("Correggi dove serve:", mytext);
+			console.log("prompt",mytext);
+			if (mytext) {
+				[arg1,arg2,...rest]=mytext.split(/ +/);
+				mydate = arg1.substr(0,10);
+				// TODO in a trasfer (both accts defined), the "to" account should be credited on the following working day...
+				// ... but only if there is a commission (bonifico), see below
+				[myamt, commission] = arg2.replace(/,/g,".").replace(/\-/g,"").split("+");
+				// TODO commission should be paid by another transaction with tag=commission and same "from" acct...
+				// ... but only if commission>0. Append "+0" to amount to force credit on following day with no commission.
+				// For example when transferring from Rendimax to Unicredit there is no commission...
+				// ... but the amt must still be credited on the following working day.
+				if(commission) myamt = (parseFloat(myamt)+parseFloat(commission)).toString();
+				mydesc = rest.join(" ");
+				// add date to Assegno, if present
+				if (mydesc.toLowerCase().indexOf("assegno")>=0) {
+					mydesc = mydesc.replace(/assegno/i, "(Assegno del "+item.date+")"); // was mydate, but I want to show the original assegno date
+				}
+				console.log("date",mydate,"amt",myamt,"desc",mydesc);
+				myresult = "Date="+mydate+" \nAmt="+myamt+"\nDesc="+mydesc;
+				myok = confirm("Confermi?\n\n"+myresult);
+				if(myok) {
+					console.log("sending data to server");
+					resetAction(item.id, mydate, myamt, mydesc);
+					mytext = null;
+				} // if ok
+			} // if text
+		} while (mytext);
+	} // confirmPrompt()
+
+
+	async function resetAction(id,date,amt,desc) {
+		//alert(id);
+		const base  = "appNIINomQocy5IWJ"; // "Anno corrente" (always access this base)
+		const table = "Transazioni";
+		const data = {
+			"fields": {
+				"Azione!": false,
+				"pending": /*desc.toLowerCase().indexOf("assegno")>=0 ? true :*/ false,
+				"ManualDate": date+"T12:00:00.000Z",
+				"amt": Number(amt),
+				"description": desc
+			}
+		}
+		const url = `https://api.airtable.com/v0/${base}/${table}/${id}`;
+		const response = await fetch(url, {
+		  method: 'PATCH', // *GET, POST, PUT, DELETE, etc.
+		  headers: {
+		    'Content-Type': 'application/json',
+		    'Authorization': 'Bearer '+APIkey
+		  },
+		  body: JSON.stringify(data) // body data type must match "Content-Type" header
+		});
+		//alert(response.json()); // .json() parses JSON response into native JavaScript objects
+		location.reload();
+	} // resetAction()
+
+	function fetchAccounts() {
+		const table = "Saldi per conto";
+		const view = "Saldi"; // filter and sort are taken from the view, must not be modified in airtable
+		const fields = [ // can be hidden or visible in airtable, it does not matter
+			"Conto",
+			"Saldo"
+		].map(item=>"fields[]="+item).join("&");
+		const API_ENDPOINT = "https://api.airtable.com/v0/" 
+			+ `${base}/${table}?view=${view}&${fields}`;
+		fetch (API_ENDPOINT, {headers: {'Authorization': 'Bearer '+APIkey}})
+		.then(res=>res.json())
+		.then(data => {
+				let total = 0;
+		    data.records.forEach(item=>{
+						total += Number(item.fields["Saldo"]);
+						const saldo = Number(item.fields["Saldo"]);
+		        accounts[item.fields["Conto"]] = {
+							items: [], 
+							saldoFinale: saldo,
+							saldoIniziale: saldo
+						}
+		    });
+				let euroEU = Intl.NumberFormat("it-IT", {
+					style: "currency",
+					currency: "EUR",
+					//maximumSignificantDigits: 2
+				});
+		    //console.log("FETCHED ACCOUNTS", accounts, "total", total.toFixed(2));
+				document.getElementById("total").innerText = euroEU.format(total);
+				fetchData();
+		 });
+	} // fetchAccounts()
+
+	function fetchData(fetchedData=[], offset='') {
+		const table = "Transazioni";
+		const view = "pending"; // filter and sort are taken from the view, must not be modified in airtable
+		const fields = [ // can be hidden or visible in airtable, it does not matter
+			"date",
+			"from acctTesto",
+			"to acctTesto",
+			"tagTesto",
+			"whoTesto",
+			"amt",
+			"description",
+			"note",
+			"Azione!",
+			"pending"
+		].map(item=>"fields[]="+item).join("&");
+		const API_ENDPOINT = "https://api.airtable.com/v0/" 
+			+ `${base}/${table}?view=${view}&${fields}&offset=${offset}`;
+		//console.log("API", API_ENDPOINT);
+		fetch (API_ENDPOINT, {headers: {'Authorization': 'Bearer '+APIkey}})
+		.then(res=>res.json())
+		.then(data => {
+			offset = data.offset || "";
+			[].push.apply(fetchedData, data.records);
+			if (offset) {
+				//console.log("FETCHING MORE DATA");
+				fetchData(fetchedData, offset);
+			} else {
+				[].push.apply(fd, fetchedData);
+				processData(fd);
+			}
+		});
+	} // fetchData()
+	
+	function processData(fetchedData) {
+		const self = this;
+		/*
+		Records representing a money transfer contain both "from" and "to" acctTesto. In this case the flag Azione!,  
+		if present, must be reset on the "to" account, because the action is only on the "from" account. In other words, 
+		only the "from" account must become yellow on or after the due day.
+		*/
+		fetchedData.forEach((item, index) => {
+			const today = new Date().toISOString().substr(0,10);
+			const id = item.id;
+			const tag = item.fields['tagTesto'] || "";
+			const who = item.fields['whoTesto'] || "";
+			const date = item.fields['date'].substr(0,10);
+			const day = ["Dom","Lun","Mar","Mer","Gio","Ven","Sab"][new Date(date).getDay()];
+			// actionToday becomes true if Azione! is true and record date is less than or equal to today
+			const action = item.fields['Azione!']; // a string to show in the 1st column: "!" or ""
+			const actionToday = action && date <= today
+				? true 
+				: false;
+			const showResetButton = action 
+				|| actionToday 
+				|| item.fields['pending']; //&& date <= today;
+			for(acctType of ["from acctTesto", "to acctTesto"]) {
+				let amt = parseFloat(item.fields['amt']); // convert text to number
+				const acct = item.fields[acctType];
+				const fromAcct = item.fields['from acctTesto'] ?  " da "+item.fields['from acctTesto'] : "";
+				const   toAcct = item.fields['to acctTesto']   ?   " a "+item.fields['to acctTesto'] : "";
+				if (acct) { // can be null for non-transfers (only one account used)
+					if(acctType == "from acctTesto") amt = -amt; // negate the debit amount
+					let saldoIniziale = accounts[acct].saldoIniziale;
+					// substract the amount, because it will be shown in the table
+					//if(actionToday) saldoIniziale -= amt;
+					if(!actionToday) accounts[acct].saldoFinale += amt;
+					// now add the other fields
+					accounts[acct].items.push({
+						id,
+						amt,
+						date: day+" "+date,
+						desc: tag+" "+who+" "+(item.fields['description']||"") + " " + (item.fields['note']||"") + fromAcct + toAcct,
+						descOrig: (item.fields['description']||""),
+						actionToday,
+						showResetButton,
+						action: action && acctType == "from acctTesto" ? true : false, // il Sì nella colonna ! viene mostrato solo per l'account debitore
+						saldoCorrente: accounts[acct].saldoFinale
+					}); // push
+				} // if acct
+			} // for credit & debit accounts
+		}); // forEach fetchedData record
+		// show the GUI
+		app.isLoaded = true;
+		registerComp();
+	} // processData()
+
+	function registerComp() {
+		// register vue component
+		Vue.component("account", {
+			props: {
+				name: String,
+				border: String,
+			},
+			data () {
+				return {
+					headers: ["!","Data","Importo","Descrizione","Saldo"]
+				} // returned data obj
+			}, // data()
+			template: '#account-template',
+			
+			filters: {
+				azione(val) {
+					return val ? "Sì" : "";
+				}, // azione
+				maiuscolo(val) {
+					return val.toUpperCase();
+				}, // maiuscolo
+			}, // filters
+			
+			methods: {
+				link(account) {
+					const links = {
+						'RISPA':        'https://airtable.com/shrsYGefZpoa6ttW5',
+						'UNICREDIT':    'https://airtable.com/shrGgt9EkkRKMxdpk',
+						'FLEXIA':       'https://airtable.com/shrK5RIrD5Z937beF',
+						'THOMAS':       'https://airtable.com/shrMMwoBsGFDf9yHG',
+						'TASSE LIBERO': 'https://airtable.com/shrrqUnA50dw7oHsf',
+						'TASSE LIKE':   'https://airtable.com/shrjGomj01y92uxAs',
+						'CINZIA':       'https://airtable.com/shri2k6s7VF0s2Lnc',
+						'CASH':         'https://airtable.com/shrdqtbYS7RkabHsx',
+						'SCATOLOTTO':   'https://airtable.com/shrITfFFZiD8hOYd1',
+						'GVL':          'https://airtable.com/shrylCRh8mEBvYZbu'
+					}
+					return links[account.toUpperCase()];
+				}, // link
+			}, // methods
+			
+			computed: {
+				hasLink() {
+					return ['RISPA','UNICREDIT','FLEXIA','THOMAS','TASSE LIBERO','TASSE LIKE','CINZIA','CASH','SCATOLOTTO','GVL']
+						.includes(this.name.toUpperCase()) ? true : false;
+				},
+				saldoIniziale() {
+					return accounts[this.name].saldoIniziale.toFixed(2);
+				}, // saldoIniziale
+				items() {
+					return accounts[this.name].items;
+				}, // items
+				oggi() {
+					return new Date().toISOString().substr(0,10);
+				}, // oggi
+				actions() {
+					return this.pending ? this.pending.some(item => item.actionToday) : false;
+				}, // actions
+			}, // computed
+
+			created() {
+
+			}, // created
+			
+			watch: {
+
+			}, // watch
+			
+		}); // Vue component
+	} // registerComp()
+	
+	var app = new Vue({
+		el: "#app",
+		data: { 
+			isLoaded: false,
+			cb: true, // checkbox controlling the border
+		}, // data()
+
+		methods: {
+			names() {
+				return Object.keys(accounts);
+			}, // names
+		}, // methods
+		
+		computed: {
+      oggi() {
+					return new Date().toISOString().substr(0,10);
+			}, // oggi
+			border() {
+				return this.cb ? "1" : "0";
+			}
+		}, // computed
+
+		created() {
+
+		}, // created
+		
+		mounted() {
+			fetchAccounts();
+			
+		} // mounted
+	}); // vue
+</script>
