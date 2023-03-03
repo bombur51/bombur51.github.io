@@ -345,8 +345,8 @@ DONE @ line 273 on 20/7/2022
 			
 			computed: {
 				hasLink() {
-					return ['RISPA','UNICREDIT','FLEXIA','THOMAS','TASSE LIBERO','TASSE LIKE','CINZIA','CASH','SCATOLOTTO','GVL']
-						.includes(this.name.toUpperCase()) ? true : false;
+					return "RISPA,UNICREDIT,FLEXIA,THOMAS,TASSE LIBERO,TASSE LIKE,CINZIA,CASH,SCATOLOTTO,GVL"
+						.split(",").includes(this.name.toUpperCase()) ? true : false;
 				},
 				saldoIniziale() {
 					return accounts[this.name].saldoIniziale.toFixed(2);
