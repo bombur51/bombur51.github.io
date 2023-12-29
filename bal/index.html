@@ -280,7 +280,7 @@ DONE @ line 273 on 20/7/2022
 					if(acctType == "from acctTesto") amt = -amt; // negate the debit amount
 					let saldoIniziale = accounts[acct].saldoIniziale;
 					// substract the amount, because it will be shown in the table
-					//if(actionToday) saldoIniziale -= amt;
+					if(actionToday) saldoIniziale -= amt;
 					if(!actionToday) accounts[acct].saldoFinale += amt;
 					// now add the other fields
 					accounts[acct].items.push({
