@@ -1,6 +1,12 @@
 <script>
   //usage: https://bombur51.github.com?vhs or https://bombur51.github.com?mdq
-  serveo="putas";
-  
-  location.href="https://"+serveo+".serveo.net/"+location.search.substr(1);
+  serveo="ancipiti";
+  site=location.search.substr(1);
+  if(site) location.href="https://"+serveo+".serveo.net/"+site;
+  else {
+    document.writeln('<ul>');
+    document.writeln('<li><a href="https://"+serveo+".serveo.net/vhs">VHS - Videocassette digitalizzate</a></li>');
+    document.writeln('<li><a href="https://"+serveo+".serveo.net/mdq">MDQ -Musica di Qualità</a></li>');
+    document.writeln('</ul>');
+  }
 </script>
